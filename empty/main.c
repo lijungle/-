@@ -21,12 +21,13 @@ int main(void)
         int key1 = key1_pressed();
         int key2 = key2_pressed();
         int key3 = key3_pressed();
+        int key4 = key4_pressed();
         uint32_t elapsed = now - last_ms;                   /* 无符号减法允许毫秒计数自然折返 */
         if (elapsed < 10) continue;                         /* 只在新的控制节拍执行一次 */
         last_ms = now;
         const ObstacleState *o = obstacle_state();
         int imu_fault = jy61p_timeout(imu_state(), now);
-        int start = control_keys(&car, key1, key2, key3, now);
+        int start = control_keys(&car, key1, key2, key3, key4, now);
         if (imu_fault && car.running) { control_stop(&car); car.stop_reason = STOP_IMU; }
         int32_t left_total, right_total;
         if (start) {

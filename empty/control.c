@@ -1,7 +1,7 @@
 #include "control.h"
 #include <math.h>
 
-#define ROUTE_COUNTS_PER_METER 3140.0f                     /* 用户最新实测值，暂按左右轮相同标定 */
+#define ROUTE_DEFAULT_COUNTS_PER_METER 3140U              /* 上电默认每米编码器计数 */
 #define ROUTE_BRAKE_MS 300U                               /* 直行结束后先刹车，再原地转向 */
 #define ROUTE_TURN_TIMEOUT_MS 10000U
 #define TURN_TOLERANCE_DEG 2.0f
@@ -109,11 +109,12 @@ void control_init(CarControl *c) {
     c->right = (PID){0.8f, 0.15f, 0, 0, 0, 100};
     c->target = 15.0f;
     c->distance_m = 1;                                     /* 默认直行终点在起点前方一米 */
+    c->counts_per_meter = ROUTE_DEFAULT_COUNTS_PER_METER;  /* 计数设置断电恢复默认值 */
 }
 
 /******************************************************************
  * 函 数 名 称：control_start
- * 函 数 说 明：记录当前位置和航向，启动可设置距离的直行控制
+ * 函 数 说 明：记录当前位置和航向，启动当前选择的路线控制
  * 函 数 形 参：c - 小车控制状态；heading - 启动时航向，单位为度
  *             left_total/right_total - 当前累计计数；now_ms - 当前毫秒数
  * 函 数 返 回：无
@@ -123,10 +124,11 @@ void control_start(CarControl *c, float heading, int32_t left_total, int32_t rig
     c->start_heading = c->previous_heading = c->heading_target;
     c->heading_integral = 0;
     c->previous_left = left_total; c->previous_right = right_total;
-    c->x = c->y = c->motion_distance = 0;                   /* 原始直线为局部坐标的纵轴，左侧为横轴正向 */
+    c->x = c->y = c->motion_distance = c->square_distance = 0; /* 建立路线起点坐标和边计数 */
     c->phase_ms = c->motion_ms = now_ms;
     c->aligned = c->tried_other = c->stop_reason = 0;
-    c->phase = ROUTE_STRAIGHT;
+    c->square_edge = 0;
+    c->phase = c->mode == MODE_SQUARE ? ROUTE_SQUARE_FORWARD : ROUTE_STRAIGHT;
     c->running = 1;
     pid_reset(&c->left); pid_reset(&c->right);
 }
@@ -142,17 +144,16 @@ void control_stop(CarControl *c) { c->running = 0; c->phase = ROUTE_IDLE; c->ali
 
 /******************************************************************
  * 函 数 名 称：control_keys
- * 函 数 说 明：处理启停、距离与速度设置，长按不重复触发
- * 函 数 形 参：c - 控制状态；key1/key2/key3 - 消抖后电平；now_ms - 毫秒数
+ * 函 数 说 明：处理启停、模式切换、距离速度和计数设置
+ * 函 数 形 参：c - 控制状态；key1~key4 - 消抖后电平；now_ms - 毫秒数
  * 函 数 返 回：1 请求启动，0 不启动；有效性检查由主循环完成
  ******************************************************************/
-int control_keys(CarControl *c, int key1, int key2, int key3, uint32_t now_ms) {
-    uint8_t keys = (key1 ? 1U : 0U) | (key2 ? 2U : 0U) | (key3 ? 4U : 0U);
+int control_keys(CarControl *c, int key1, int key2, int key3, int key4, uint32_t now_ms) {
+    uint8_t keys = (key1 ? 1U : 0U) | (key2 ? 2U : 0U) | (key3 ? 4U : 0U) | (key4 ? 8U : 0U);
     uint8_t pressed = keys & (uint8_t)~c->keys_last;
     uint8_t released = c->keys_last & (uint8_t)~keys;
     int start = 0;
     if (pressed & 2U) { c->key2_ms = now_ms; c->key2_long = c->running; }
-    if (pressed & 4U) { c->key3_ms = now_ms; c->key3_long = 0; }
     if (key3 && c->running) {
         control_stop(c); c->stop_reason = STOP_KEY;         /* 行驶时停止键优先，不能进入设置 */
     }
@@ -162,23 +163,30 @@ int control_keys(CarControl *c, int key1, int key2, int key3, uint32_t now_ms) {
         return 0;
     }
     if (c->setting) {
-        if (key3 && now_ms - c->key3_ms >= 1000) {
-            c->setting = SETTING_NONE; c->key3_long = 1;   /* 长按退出，不再把松开当作切页 */
-        } else if ((released & 4U) && !c->key3_long) {
-            c->setting = c->setting == SETTING_DISTANCE ? SETTING_SPEED : SETTING_DISTANCE;
-        } else if (!key3) {
+        if (key2 && now_ms - c->key2_ms >= 1000) {
+            c->setting = SETTING_NONE;                     /* 设置页长按 KEY2 退出 */
+            c->key2_long = 1;
+        } else if ((released & 2U) && !c->key2_long) {
+            c->setting = c->setting == SETTING_DISTANCE ? SETTING_SPEED :
+                         c->setting == SETTING_SPEED ? SETTING_COUNTS : SETTING_DISTANCE;
+        } else {
             if (c->setting == SETTING_DISTANCE) {
                 if ((pressed & 1U) && c->distance_m < 10) ++c->distance_m;
-                if ((pressed & 2U) && c->distance_m > 1) --c->distance_m;
-            } else {
+                if ((pressed & 4U) && c->distance_m > 1) --c->distance_m;
+            } else if (c->setting == SETTING_SPEED) {
                 if ((pressed & 1U) && c->target < 30) c->target += 1;
-                if ((pressed & 2U) && c->target > 5) c->target -= 1;
+                if ((pressed & 4U) && c->target > 5) c->target -= 1;
+            } else {
+                if ((pressed & 1U) && c->counts_per_meter < 10000) c->counts_per_meter += 10;
+                if ((pressed & 4U) && c->counts_per_meter > 1000) c->counts_per_meter -= 10;
             }
         }
     } else if (!c->running && !key3) {
         if (key2 && !c->key2_long && now_ms - c->key2_ms >= 1000) {
             c->setting = SETTING_DISTANCE; c->key2_long = 1;
-        } else if ((pressed & 1U) && !key2) start = 1;
+        } else if (pressed & 8U) {
+            c->mode = c->mode == MODE_SQUARE ? MODE_STRAIGHT : MODE_SQUARE;
+        } else if ((pressed & 1U) && !key2 && !key4) start = 1;
     }
     c->keys_last = keys;
     return start;
@@ -193,6 +201,7 @@ int control_keys(CarControl *c, int key1, int key2, int key3, uint32_t now_ms) {
 static void route_enter(CarControl *c, uint8_t phase, uint32_t now_ms) {
     c->phase = phase;
     c->phase_ms = c->motion_ms = now_ms;
+    if (phase == ROUTE_SQUARE_FORWARD) c->square_distance = 0; /* 每条方形边重新计量 */
     c->aligned = 0; c->heading_integral = c->motion_distance = 0;
     pid_reset(&c->left); pid_reset(&c->right);               /* 阶段切换不继承上段速度积分 */
 }
@@ -248,12 +257,12 @@ void control_step(CarControl *c, float left_count, float right_count, int32_t le
     }
     int32_t dl = (int32_t)((uint32_t)left_total - (uint32_t)c->previous_left);
     int32_t dr = (int32_t)((uint32_t)right_total - (uint32_t)c->previous_right);
-    float ds = ((float)dl + (float)dr) * 0.5f / ROUTE_COUNTS_PER_METER; /* 两轮平均净计数换算为中心位移 */
+    float ds = ((float)dl + (float)dr) * 0.5f / (float)c->counts_per_meter; /* 使用当前标定值换算中心位移 */
     float angle = wrap_angle(c->previous_heading + wrap_angle(heading - c->previous_heading) * 0.5f - c->start_heading); /* 用跨界中间航向投影 */
     c->x += ds * cosf(angle * RAD_PER_DEG);
     c->y += ds * sinf(angle * RAD_PER_DEG);                  /* 对称原地转向两轮增量相抵，不虚增位移 */
     c->previous_left = left_total; c->previous_right = right_total; c->previous_heading = heading;
-    if (c->x > c->distance_m + 0.05f) { route_stop(c, STOP_PATH); return; }
+    if (c->mode == MODE_STRAIGHT && c->x > c->distance_m + 0.05f) { route_stop(c, STOP_PATH); return; }
     if (c->phase == ROUTE_BRAKE) {
         if (now_ms - c->phase_ms >= ROUTE_BRAKE_MS) route_enter(c, c->next_phase, now_ms);
         return;
@@ -275,7 +284,8 @@ void control_step(CarControl *c, float left_count, float right_count, int32_t le
     float left_target, right_target;
     if (turning) {
         if (now_ms - c->phase_ms >= ROUTE_TURN_TIMEOUT_MS) { route_stop(c, STOP_TURN_TIMEOUT); return; }
-        float offset = c->phase == ROUTE_TURN_OUT ? c->detour_side * 90.0f :
+        float offset = c->mode == MODE_SQUARE ? -(float)(c->square_edge + 0U) * 90.0f :
+                       c->phase == ROUTE_TURN_OUT ? c->detour_side * 90.0f :
                        c->phase == ROUTE_TURN_IN ? -c->detour_side * 90.0f : 0;
         c->heading_target = wrap_angle(c->start_heading + offset);
         float error = wrap_angle(c->heading_target - heading);
@@ -284,6 +294,11 @@ void control_step(CarControl *c, float left_count, float right_count, int32_t le
             if (fabsf(gyro) > 5.0f) { c->aligned = 0; return; }
             if (!c->aligned) { c->aligned = 1; c->aligned_ms = now_ms; }
             if (now_ms - c->aligned_ms >= TURN_STABLE_MS) {
+                if (c->mode == MODE_SQUARE && c->phase == ROUTE_TURN_OUT) {
+                    if (c->square_edge >= 4) { route_stop(c, STOP_DONE); return; }
+                    route_enter(c, ROUTE_SQUARE_FORWARD, now_ms);
+                    return;
+                }
                 uint8_t next = c->phase == ROUTE_TURN_OUT ? ROUTE_CHECK :
                                c->phase == ROUTE_TURN_FORWARD ? ROUTE_PASS :
                                c->phase == ROUTE_TURN_IN ? ROUTE_SHIFT_IN : ROUTE_STRAIGHT;
@@ -297,7 +312,17 @@ void control_step(CarControl *c, float left_count, float right_count, int32_t le
         left_target = error < 0 ? speed : -speed;
         right_target = -left_target;                       /* 顺时针负角度：左轮前进、右轮后退 */
     } else {
-        if (obstacle_blocked(o)) {
+        if (c->mode == MODE_SQUARE) {
+            float remaining = (float)c->distance_m - c->square_distance;
+            c->heading_target = wrap_angle(c->start_heading - (float)c->square_edge * 90.0f);
+            if (remaining <= 0.05f) {
+                if (c->square_edge >= 4) { route_stop(c, STOP_DONE); return; }
+                ++c->square_edge; c->detour_side = -1;
+                route_brake(c, ROUTE_TURN_OUT, now_ms);
+                return;
+            }
+            c->square_distance += ds;
+        } else if (obstacle_blocked(o)) {
             if (c->phase != ROUTE_STRAIGHT) { route_stop(c, STOP_BLOCKED); return; }
             float range = o->sonar_result == SONAR_VALID ? o->distance_mm / 1000.0f : 0.50f;
             c->bypass_x = c->x + range + SONAR_AXLE_OFFSET_M + OBSTACLE_LENGTH_M + REAR_CLEARANCE_M + BYPASS_MARGIN_M; /* 车尾越过障碍并留间隙后才返回 */
@@ -320,7 +345,13 @@ void control_step(CarControl *c, float left_count, float right_count, int32_t le
             base = 0;
         }
         float tolerance = c->phase == ROUTE_STRAIGHT ? 0.05f : 0.02f;
-        if (remaining <= tolerance) {
+        if (c->mode == MODE_SQUARE) {
+            remaining = (float)c->distance_m - c->square_distance;
+            cross = 0;
+            base = -(float)c->square_edge * 90.0f;
+            tolerance = 0.05f;
+        }
+        if (c->mode != MODE_SQUARE && remaining <= tolerance) {
             if (fabsf(cross) > 0.05f) { route_stop(c, STOP_PATH); return; }
             if (c->phase == ROUTE_STRAIGHT) route_stop(c, STOP_DONE);
             else {
@@ -331,12 +362,12 @@ void control_step(CarControl *c, float left_count, float right_count, int32_t le
             }
             return;
         }
-        c->motion_distance += ds;
+        c->motion_distance += fabsf(ds);                  /* 独立累计本阶段位移，用于堵转保护 */
         if (c->motion_distance >= 0.005f) { c->motion_ms = now_ms; c->motion_distance = 0; }
         if (now_ms - c->motion_ms >= 2000) { route_stop(c, STOP_STALL); return; }
         float limit = c->phase == ROUTE_STRAIGHT ? c->target : fminf(c->target, 10.0f);
         if (o->sonar_result == SONAR_VALID && o->distance_mm < 1000) limit = fminf(limit, 10.0f);
-        float speed = clampf(remaining * ROUTE_COUNTS_PER_METER * 0.02f, 2.0f, limit);
+        float speed = clampf(remaining * (float)c->counts_per_meter * 0.02f, 2.0f, limit);
         float correction;
         float trim = clampf(-atan2f(cross, 0.40f) / RAD_PER_DEG, -15.0f, 15.0f);
         c->heading_target = wrap_angle(c->start_heading + base + trim); /* 同时纠正横向偏移与航向 */

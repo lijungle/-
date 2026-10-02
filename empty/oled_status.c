@@ -173,24 +173,30 @@ void oled_status(const CarControl *car, const ObstacleState *o, float yaw)
         snprintf(text, sizeof(text), "E%u P%u %05uus", o->echo_stage, o->echo_level, o->echo_us);
         oled_text(0, 48, text);                             /* 零未收到上升沿，一只有上升沿，二完整脉冲 */
     } else if (car->setting) {
-        oled_words(0, car->setting == SETTING_DISTANCE ? CN_JU : CN_SU,
-                   car->setting == SETTING_DISTANCE ? CN_LI : CN_DU, CN_SHE, CN_ZHI_SET);
-        snprintf(text, sizeof(text), car->setting == SETTING_DISTANCE ? "%um" : "%u/10ms",
-                 car->setting == SETTING_DISTANCE ? (unsigned)car->distance_m : (unsigned)car->target);
+        oled_words(0, car->setting == SETTING_DISTANCE ? CN_JU :
+                   car->setting == SETTING_SPEED ? CN_SU : CN_JU,
+                   car->setting == SETTING_DISTANCE ? CN_LI :
+                   car->setting == SETTING_SPEED ? CN_DU : CN_LI, CN_SHE, CN_ZHI_SET);
+        snprintf(text, sizeof(text), car->setting == SETTING_DISTANCE ? "%um" :
+                 car->setting == SETTING_SPEED ? "%u/10ms" : "%u",
+                 car->setting == SETTING_DISTANCE ? (unsigned)car->distance_m :
+                 car->setting == SETTING_SPEED ? (unsigned)car->target : (unsigned)car->counts_per_meter);
         oled_text(64, 16, text);                            /* 独立页面的数值最多占八个字符 */
-        oled_words(32, car->setting == SETTING_DISTANCE ? CN_SU : CN_JU,
-                   car->setting == SETTING_DISTANCE ? CN_DU : CN_LI, -1, -1);
-        snprintf(text, sizeof(text), car->setting == SETTING_DISTANCE ? "%u" : "%um",
-                 car->setting == SETTING_DISTANCE ? (unsigned)car->target : (unsigned)car->distance_m);
+        oled_words(32, CN_SU, CN_DU, -1, -1);
+        snprintf(text, sizeof(text), "M:%u V:%u C:%u", (unsigned)car->distance_m,
+                 (unsigned)car->target, (unsigned)car->counts_per_meter);
         oled_text(64, 32, text);
     } else if (car->running) {
-        if (car->phase == ROUTE_STRAIGHT) oled_words(0, CN_ZHI_STRAIGHT, CN_XING, -1, -1);
+        if (car->mode == MODE_SQUARE) oled_words(0, CN_RAO, CN_XING, -1, -1);
+        else if (car->phase == ROUTE_STRAIGHT) oled_words(0, CN_ZHI_STRAIGHT, CN_XING, -1, -1);
         else if (car->phase == ROUTE_BRAKE) oled_words(0, CN_TING, CN_ZHI, -1, -1);
         else if (car->phase == ROUTE_CHECK) oled_words(0, CN_JIAN, CN_CE, -1, -1);
         else if (car->phase == ROUTE_SHIFT_IN) oled_words(0, CN_FAN, CN_HUI, -1, -1);
         else if (car->phase == ROUTE_SHIFT_OUT || car->phase == ROUTE_PASS) oled_words(0, CN_RAO, CN_XING, -1, -1);
         else oled_words(0, CN_ZHUAN, CN_WAN, -1, -1);
-        if (car->phase != ROUTE_STRAIGHT && car->phase != ROUTE_BRAKE)
+        if (car->mode == MODE_SQUARE)
+            snprintf(text, sizeof(text), "B%u/4", (unsigned)(car->square_edge + 1));
+        else if (car->phase != ROUTE_STRAIGHT && car->phase != ROUTE_BRAKE)
             oled_chinese(48, 0, car->detour_side > 0 ? CN_ZUO : CN_YOU);
     } else {
         switch (car->stop_reason) {
@@ -212,6 +218,8 @@ void oled_status(const CarControl *car, const ObstacleState *o, float yaw)
         snprintf(text, sizeof(text), "%d.%02d/%um", cm / 100, cm % 100, (unsigned)car->distance_m);
         oled_text(40, 16, text);                            /* 横向绕行不算入纵向终点距离 */
         oled_text(0, 32, "                ");              /* 回退版不显示传感器状态 */
+        if (!car->running) oled_words(32, car->mode == MODE_SQUARE ? CN_RAO : CN_ZHI_STRAIGHT,
+                                      CN_XING, -1, -1);     /* 停止页显示当前路线模式 */
     }
     {
         oled_chinese(0, 48, CN_HANG); oled_chinese(16, 48, CN_XIANG);

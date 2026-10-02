@@ -8,7 +8,7 @@ void board_poll(void);
 void oled_init(void);
 void oled_poll(void);
 uint32_t board_millis(void);
-int key1_pressed(void), key2_pressed(void), key3_pressed(void);
+int key1_pressed(void), key2_pressed(void), key3_pressed(void), key4_pressed(void);
 void motor_set(float left, float right);
 void oled_status(const CarControl *car, const ObstacleState *obstacle, float yaw);
 const ObstacleState *obstacle_state(void);

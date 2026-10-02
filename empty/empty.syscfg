@@ -27,6 +27,7 @@ function pin(name, portPin, direction) {
 pin("KEY1", "PA26", "INPUT");
 pin("KEY2", "PA25", "INPUT");
 pin("KEY3", "PA12", "INPUT"); // 按引脚分配表，KEY3 固定接 PA12
+pin("KEY4", "PB21", "INPUT"); // KEY4 模式切换，低电平有效
 pin("ENC_LEFT_A", "PA17", "INPUT");
 pin("ENC_LEFT_B", "PA24", "INPUT");
 pin("ENC_RIGHT_A", "PA15", "INPUT");

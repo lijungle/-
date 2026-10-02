@@ -70,8 +70,8 @@ static void move(float meters) {
  * 函 数 返 回：无
  ******************************************************************/
 static void press(int key) {
-    assert(!control_keys(&car, key == 1, key == 2, key == 3, ++now));
-    assert(!control_keys(&car, 0, 0, 0, ++now));
+    assert(!control_keys(&car, key == 1, key == 2, key == 3, 0, ++now));
+    assert(!control_keys(&car, 0, 0, 0, 0, ++now));
 }
 
 /******************************************************************
@@ -147,10 +147,10 @@ int main(void) {
     step(110, 0); assert(car.running && isfinite(car.x));   /* 时间、累计计数和航向均允许折返 */
 
     control_init(&car); now = 0;
-    control_keys(&car, 0, 1, 0, now);
-    control_keys(&car, 0, 1, 0, now = 1000);
+    control_keys(&car, 0, 1, 0, 0, now);
+    control_keys(&car, 0, 1, 0, 0, now = 1000);
     assert(car.setting == SETTING_DISTANCE && car.distance_m == 1);
-    control_keys(&car, 0, 0, 0, ++now);
+    control_keys(&car, 0, 0, 0, 0, ++now);
     for (int i = 0; i < 15; ++i) press(1);
     assert(car.distance_m == 10 && !car.running);
     for (int i = 0; i < 15; ++i) press(2);
@@ -160,21 +160,21 @@ int main(void) {
     assert(car.target == 30);
     for (int i = 0; i < 40; ++i) press(2);
     assert(car.target == 5);
-    control_keys(&car, 0, 0, 1, ++now);
-    control_keys(&car, 0, 0, 1, now += 1000);
+    control_keys(&car, 0, 0, 1, 0, ++now);
+    control_keys(&car, 0, 0, 1, 0, now += 1000);
     assert(!car.setting && !car.running);
-    control_keys(&car, 0, 0, 0, ++now);
-    assert(control_keys(&car, 1, 0, 0, ++now));
-    assert(!control_keys(&car, 1, 0, 0, ++now));             /* 长按不重复启动 */
+    control_keys(&car, 0, 0, 0, 0, ++now);
+    assert(control_keys(&car, 1, 0, 0, 0, ++now));
+    assert(!control_keys(&car, 1, 0, 0, 0, ++now));             /* 长按不重复启动 */
     control_start(&car, 0, 0, 0, now);
-    control_keys(&car, 0, 0, 1, ++now);
+    control_keys(&car, 0, 0, 1, 0, ++now);
     assert(!car.running && car.stop_reason == STOP_KEY);
     control_init(&car); car.sensor_test = 1;
-    assert(!control_keys(&car, 1, 0, 0, ++now));
-    control_keys(&car, 0, 1, 0, ++now);
-    control_keys(&car, 0, 1, 0, now += 1000);
+    assert(!control_keys(&car, 1, 0, 0, 0, ++now));
+    control_keys(&car, 0, 1, 0, 0, ++now);
+    control_keys(&car, 0, 1, 0, 0, now += 1000);
     assert(car.sensor_test && !car.setting && !car.running);
-    control_keys(&car, 0, 0, 1, ++now);
+    control_keys(&car, 0, 0, 1, 0, ++now);
     assert(!car.sensor_test && !car.running);               /* 检测页只能退出，不启动或进入设置 */
     puts("obstacle route self-check: PASS");
     return 0;

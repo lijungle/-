@@ -179,6 +179,12 @@ extern "C" {
 /* Defines for KEY3_PIN: GPIOA.12 with pinCMx 34 on package pin 5 */
 #define KEY3_KEY3_PIN_PIN                                       (DL_GPIO_PIN_12)
 #define KEY3_KEY3_PIN_IOMUX                                      (IOMUX_PINCM34)
+/* Port definition for Pin Group KEY4 */
+#define KEY4_PORT                                                        (GPIOB)
+
+/* Defines for KEY4_PIN: GPIOB.21 with pinCMx 49 on package pin 20 */
+#define KEY4_KEY4_PIN_PIN                                       (DL_GPIO_PIN_21)
+#define KEY4_KEY4_PIN_IOMUX                                      (IOMUX_PINCM49)
 /* Port definition for Pin Group ENC_LEFT_A */
 #define ENC_LEFT_A_PORT                                                  (GPIOA)
 

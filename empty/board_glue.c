@@ -107,6 +107,14 @@ int key2_pressed(void) { return key_debounce(KEY2_PORT, KEY2_KEY2_PIN_PIN, 2); }
 int key3_pressed(void) { return key_debounce(KEY3_PORT, KEY3_KEY3_PIN_PIN, 1); }
 
 /******************************************************************
+ * 函 数 名 称：key4_pressed
+ * 函 数 说 明：读取 PB21 模式切换键
+ * 函 数 形 参：无
+ * 函 数 返 回：消抖后的按下状态
+ ******************************************************************/
+int key4_pressed(void) { return key_debounce(KEY4_PORT, KEY4_KEY4_PIN_PIN, 3); }
+
+/******************************************************************
  * 函 数 名 称：motor_channel
  * 函 数 说 明：设置一路高电平占空比，并单独处理恒高和恒低端点
  * 函 数 形 参：timer/index - 定时器通道；high/period - 高电平计数/周期；invert - 是否反相
