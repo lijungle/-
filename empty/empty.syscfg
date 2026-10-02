@@ -1,0 +1,77 @@
+/**
+ * @cliArgs --device "MSPM0G350X" --package "LQFP-64(PM)" --part "Default" --product "mspm0_sdk@2.04.00.06"
+ * @v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)" --product "mspm0_sdk@2.04.00.06"
+ * @versions {"tool":"1.23.1+4034"}
+ */
+const GPIO = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+const UART = scripting.addModule("/ti/driverlib/UART", {}, false);
+const TIMER = scripting.addModule("/ti/driverlib/TIMER", {}, false);
+const I2C = scripting.addModule("/ti/driverlib/I2C", {}, false);
+const PWM = scripting.addModule("/ti/driverlib/PWM", {}, false);
+const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
+
+function pin(name, portPin, direction) {
+    const g = GPIO.addInstance();
+    g.$name = name;
+    g.associatedPins[0].$name = name + "_PIN";
+    g.associatedPins[0].pin.$assign = portPin;
+    if (direction) g.associatedPins[0].direction = direction;
+    if (direction === "INPUT") g.associatedPins[0].internalResistor = "PULL_UP";
+    if (name === "ENC_LEFT_A" || name === "ENC_RIGHT_A") {
+        g.associatedPins[0].interruptEn = true;
+        g.associatedPins[0].polarity = "RISE_FALL";
+    }
+    return g;
+}
+
+pin("KEY1", "PA26", "INPUT");
+pin("KEY2", "PA25", "INPUT");
+pin("KEY3", "PA12", "INPUT"); // 按引脚分配表，KEY3 固定接 PA12
+pin("ENC_LEFT_A", "PA17", "INPUT");
+pin("ENC_LEFT_B", "PA24", "INPUT");
+pin("ENC_RIGHT_A", "PA15", "INPUT");
+pin("ENC_RIGHT_B", "PA16", "INPUT");
+// AT8236 四路输入均使用硬件 PWM，映射与参考工程一致
+const pwm0 = PWM.addInstance();
+pwm0.$name = "PWM_0";
+pwm0.clockDivider = 8;
+pwm0.timerCount = 400; // 32 MHz / 8 / 400 = 10 kHz
+pwm0.peripheral.$assign = "TIMA1";
+pwm0.peripheral.ccp0Pin.$assign = "PB4";
+pwm0.peripheral.ccp1Pin.$assign = "PB1";
+pwm0.PWM_CHANNEL_0.invert = true;
+pwm0.PWM_CHANNEL_1.invert = true;
+const pwm1 = PWM.addInstance();
+pwm1.$name = "PWM_1";
+pwm1.clockDivider = 8;
+pwm1.timerCount = 400;
+pwm1.peripheral.$assign = "TIMG7";
+pwm1.peripheral.ccp0Pin.$assign = "PA23";
+pwm1.peripheral.ccp1Pin.$assign = "PA18";
+
+const uart = UART.addInstance();
+uart.$name = "JY61P_UART";
+uart.targetBaudRate = 115200;
+uart.peripheral.$assign = "UART3";
+uart.peripheral.rxPin.$assign = "PB3";
+uart.peripheral.txPin.$assign = "PB2";
+uart.enabledInterrupts = ["RX"];
+
+const timer = TIMER.addInstance();
+timer.$name = "CONTROL_TIMER";
+timer.timerMode = "PERIODIC";
+timer.timerPeriod = "10 ms";
+timer.timerClkPrescale = 256;
+timer.timerStartTimer = true;
+timer.interrupts = ["ZERO"];
+timer.peripheral.$assign = "TIMG0";
+
+const i2c = I2C.addInstance();
+i2c.$name = "OLED_I2C";
+i2c.basicEnableController = true;
+i2c.peripheral.$assign = "I2C0";
+i2c.peripheral.sdaPin.$assign = "PA28";
+i2c.peripheral.sclPin.$assign = "PA31";
+
+SYSCTL.forceDefaultClkConfig = true;
+SYSCTL.clockTreeEn = true;

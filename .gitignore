@@ -1,0 +1,35 @@
+# Keil / ARM 编译中间文件
+**/Objects/
+**/Listings/
+*.o
+*.d
+*.axf
+*.elf
+*.map
+*.lnp
+*.dep
+*.htm
+*.lst
+
+# Keil 用户界面缓存
+*.uvguix.*
+*.uvguix
+
+# 其他工具链输出目录
+**/Debug/
+**/Release/
+**/build/
+**/out/
+
+# 测试程序和生成的预览文件
+**/tests/*.exe
+**/tests/*.pgm
+**/tests/*.png
+
+# Windows 和编辑器临时文件
+*.bak
+*.tmp
+*.log
+*.swp
+Thumbs.db
+Desktop.ini
