@@ -51,12 +51,28 @@ pwm1.peripheral.ccp0Pin.$assign = "PA23";
 pwm1.peripheral.ccp1Pin.$assign = "PA18";
 
 const uart = UART.addInstance();
+const gps_uart = UART.addInstance();
+gps_uart.$name = "GPS_UART";
+gps_uart.targetBaudRate = 115200;
+gps_uart.peripheral.$assign = "UART1";
+gps_uart.peripheral.rxPin.$assign = "PB7";
+gps_uart.peripheral.txPin.$assign = "PB6";
+gps_uart.enabledInterrupts = ["RX"];
+
 uart.$name = "JY61P_UART";
 uart.targetBaudRate = 115200;
 uart.peripheral.$assign = "UART3";
 uart.peripheral.rxPin.$assign = "PB3";
 uart.peripheral.txPin.$assign = "PB2";
 uart.enabledInterrupts = ["RX"];
+
+const esp_uart = UART.addInstance();
+esp_uart.$name = "ESP_UART";
+esp_uart.targetBaudRate = 115200;
+esp_uart.peripheral.$assign = "UART2";
+esp_uart.peripheral.txPin.$assign = "PB15";
+esp_uart.peripheral.rxPin.$assign = "PB16";
+esp_uart.enabledInterrupts = ["RX"];
 
 const timer = TIMER.addInstance();
 timer.$name = "CONTROL_TIMER";

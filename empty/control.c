@@ -1,7 +1,7 @@
 #include "control.h"
 #include <math.h>
 
-#define ROUTE_DEFAULT_COUNTS_PER_METER 3140U              /* 上电默认每米编码器计数 */
+#define ROUTE_DEFAULT_COUNTS_PER_METER 3250U              /* 上电默认每米编码器计数 */
 #define ROUTE_BRAKE_MS 300U                               /* 直行结束后先刹车，再原地转向 */
 #define ROUTE_TURN_TIMEOUT_MS 10000U
 #define TURN_TOLERANCE_DEG 2.0f
@@ -107,7 +107,7 @@ void control_init(CarControl *c) {
     *c = (CarControl){0};                                  /* 包括路线阶段及计数基准，上电不自动启动 */
     c->left = (PID){0.8f, 0.15f, 0, 0, 0, 100};             /* 关闭速度微分项，减少编码器跳变引起的抖动 */
     c->right = (PID){0.8f, 0.15f, 0, 0, 0, 100};
-    c->target = 15.0f;
+    c->target = 20.0f;
     c->distance_m = 1;                                     /* 默认直行终点在起点前方一米 */
     c->counts_per_meter = ROUTE_DEFAULT_COUNTS_PER_METER;  /* 计数设置断电恢复默认值 */
 }
@@ -143,6 +143,24 @@ void control_start(CarControl *c, float heading, int32_t left_total, int32_t rig
 void control_stop(CarControl *c) { c->running = 0; c->phase = ROUTE_IDLE; c->aligned = 0; c->heading_integral = 0; pid_reset(&c->left); pid_reset(&c->right); }
 
 /******************************************************************
+ * 函 数 名 称：control_remote
+ * 函 数 说 明：接收远程定时动作，停止命令可取消任意路线
+ * 函 数 形 参：c - 控制状态；command - 已校验命令；now_ms - 当前毫秒
+ * 函 数 返 回：无
+ * 备       注：设置页禁止远程起动；速度百分比映射至 0~30 计数每十毫秒
+ ******************************************************************/
+void control_remote(CarControl *c, const ESPCommand *command, uint32_t now_ms)
+{
+    if (command->cmd == ESP_STOP || !command->speed) {
+        control_stop(c); c->stop_reason = STOP_KEY; return;
+    }
+    if (c->setting || c->sensor_test) return;
+    control_stop(c);                                      /* 切换控制来源先清空 PID 历史 */
+    c->remote = *command; c->remote_ms = now_ms; c->remote_turn_ready = 0;
+    c->phase = ROUTE_REMOTE; c->running = 1; c->stop_reason = STOP_NONE;
+}
+
+/******************************************************************
  * 函 数 名 称：control_keys
  * 函 数 说 明：处理启停、模式切换、距离速度和计数设置
  * 函 数 形 参：c - 控制状态；key1~key4 - 消抖后电平；now_ms - 毫秒数
@@ -151,9 +169,15 @@ void control_stop(CarControl *c) { c->running = 0; c->phase = ROUTE_IDLE; c->ali
 int control_keys(CarControl *c, int key1, int key2, int key3, int key4, uint32_t now_ms) {
     uint8_t keys = (key1 ? 1U : 0U) | (key2 ? 2U : 0U) | (key3 ? 4U : 0U) | (key4 ? 8U : 0U);
     uint8_t pressed = keys & (uint8_t)~c->keys_last;
-    uint8_t released = c->keys_last & (uint8_t)~keys;
     int start = 0;
     if (pressed & 2U) { c->key2_ms = now_ms; c->key2_long = c->running; }
+    if (!key2) c->key2_ms = 0;                              /* 松开后清除本次长按起点 */
+    else if (c->key2_ms == 0) c->key2_ms = now_ms ? now_ms : 1U; /* 漏捕获按下沿时仍从当前时刻计时 */
+    if (key2) {
+        if (c->key2_hold_ms < 1000) c->key2_hold_ms += 10;  /* 控制循环固定十毫秒，独立累计长按时间 */
+    } else {
+        c->key2_hold_ms = 0;                               /* 松开后重新识别下一次长按 */
+    }
     if (key3 && c->running) {
         control_stop(c); c->stop_reason = STOP_KEY;         /* 行驶时停止键优先，不能进入设置 */
     }
@@ -163,12 +187,13 @@ int control_keys(CarControl *c, int key1, int key2, int key3, int key4, uint32_t
         return 0;
     }
     if (c->setting) {
-        if (key2 && now_ms - c->key2_ms >= 1000) {
-            c->setting = SETTING_NONE;                     /* 设置页长按 KEY2 退出 */
-            c->key2_long = 1;
-        } else if ((released & 2U) && !c->key2_long) {
+        if (c->setting == SETTING_GPS) {
+            if (pressed & 2U) c->setting = SETTING_NONE;   /* GPS 页短按 KEY2 返回停车页面 */
+        } else if (pressed & 8U) {
             c->setting = c->setting == SETTING_DISTANCE ? SETTING_SPEED :
                          c->setting == SETTING_SPEED ? SETTING_COUNTS : SETTING_DISTANCE;
+        } else if (pressed & 2U) {
+            c->setting = SETTING_GPS;                     /* 设置页短按 KEY2 进入 GPS 页面 */
         } else {
             if (c->setting == SETTING_DISTANCE) {
                 if ((pressed & 1U) && c->distance_m < 10) ++c->distance_m;
@@ -181,12 +206,12 @@ int control_keys(CarControl *c, int key1, int key2, int key3, int key4, uint32_t
                 if ((pressed & 4U) && c->counts_per_meter > 1000) c->counts_per_meter -= 10;
             }
         }
-    } else if (!c->running && !key3) {
-        if (key2 && !c->key2_long && now_ms - c->key2_ms >= 1000) {
-            c->setting = SETTING_DISTANCE; c->key2_long = 1;
+    } else if (!c->running) {
+        if (pressed & 2U) {
+            c->setting = SETTING_DISTANCE;                /* 停车页短按 KEY2 进入设置 */
         } else if (pressed & 8U) {
             c->mode = c->mode == MODE_SQUARE ? MODE_STRAIGHT : MODE_SQUARE;
-        } else if ((pressed & 1U) && !key2 && !key4) start = 1;
+        } else if ((pressed & 1U) && !key2 && !key3 && !key4) start = 1;
     }
     c->keys_last = keys;
     return start;
@@ -254,6 +279,41 @@ void control_step(CarControl *c, float left_count, float right_count, int32_t le
     if (!c->running) return;
     if (!isfinite(heading) || !isfinite(gyro) || !isfinite(dt) || dt <= 0) {
         route_stop(c, STOP_IMU); return;
+    }
+    if (c->phase == ROUTE_REMOTE) {
+        float speed = c->remote.speed * 0.30f;
+        float left_target = speed, right_target = speed;
+        if (c->remote.cmd == ESP_LEFT || c->remote.cmd == ESP_RIGHT) {
+            float error;
+            if (!c->remote_turn_ready) {
+                c->heading_target = wrap_angle(heading + (c->remote.cmd == ESP_LEFT ? 90.0f : -90.0f));
+                c->remote_turn_ready = 1;                /* 首个控制周期锁定当前航向，目标固定九十度 */
+            }
+            if (now_ms - c->remote_ms >= ROUTE_TURN_TIMEOUT_MS) {
+                route_stop(c, STOP_TURN_TIMEOUT); return;  /* 转向最长十秒，防止惯导异常时持续转动 */
+            }
+            error = wrap_angle(c->heading_target - heading);
+            if (fabsf(error) <= TURN_TOLERANCE_DEG) {
+                if (!c->aligned) { c->aligned = 1; c->aligned_ms = now_ms; }
+                if (fabsf(gyro) <= 5.0f && now_ms - c->aligned_ms >= TURN_STABLE_MS) {
+                    route_stop(c, STOP_DONE); return;      /* 航向误差和角速度同时稳定后停车 */
+                }
+                pid_reset(&c->left); pid_reset(&c->right);
+                return;
+            }
+            c->aligned = 0;
+            speed = clampf(fabsf(error) * 0.08f, TURN_MIN_SPEED, fminf(TURN_MAX_SPEED, speed));
+            left_target = error < 0 ? speed : -speed;
+            right_target = -left_target;
+        } else {
+            if (now_ms - c->remote_ms >= c->remote.duration_ms) {
+                route_stop(c, STOP_DONE); return;          /* 直行和后退按协议时长自动停车 */
+            }
+            if (c->remote.cmd == ESP_BACKWARD) left_target = right_target = -speed;
+        }
+        *left_pwm = pid_step(&c->left, left_target, left_count, dt);
+        *right_pwm = pid_step(&c->right, right_target, right_count, dt);
+        return;
     }
     int32_t dl = (int32_t)((uint32_t)left_total - (uint32_t)c->previous_left);
     int32_t dr = (int32_t)((uint32_t)right_total - (uint32_t)c->previous_right);

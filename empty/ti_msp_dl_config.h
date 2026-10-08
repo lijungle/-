@@ -156,6 +156,38 @@ extern "C" {
 #define JY61P_UART_BAUD_RATE                                            (115200)
 #define JY61P_UART_IBRD_32_MHZ_115200_BAUD                                  (17)
 #define JY61P_UART_FBRD_32_MHZ_115200_BAUD                                  (23)
+/* Defines for GPS_UART */
+#define GPS_UART_INST                                                      UART1
+#define GPS_UART_INST_FREQUENCY                                         32000000
+#define GPS_UART_INST_IRQHandler                                UART1_IRQHandler
+#define GPS_UART_INST_INT_IRQN                                    UART1_INT_IRQn
+#define GPIO_GPS_UART_RX_PORT                                              GPIOB
+#define GPIO_GPS_UART_TX_PORT                                              GPIOB
+#define GPIO_GPS_UART_RX_PIN                                       DL_GPIO_PIN_7
+#define GPIO_GPS_UART_TX_PIN                                       DL_GPIO_PIN_6
+#define GPIO_GPS_UART_IOMUX_RX                                   (IOMUX_PINCM24)
+#define GPIO_GPS_UART_IOMUX_TX                                   (IOMUX_PINCM23)
+#define GPIO_GPS_UART_IOMUX_RX_FUNC                    IOMUX_PINCM24_PF_UART1_RX
+#define GPIO_GPS_UART_IOMUX_TX_FUNC                    IOMUX_PINCM23_PF_UART1_TX
+#define GPS_UART_BAUD_RATE                                              (115200)
+#define GPS_UART_IBRD_32_MHZ_115200_BAUD                                    (17)
+#define GPS_UART_FBRD_32_MHZ_115200_BAUD                                    (23)
+/* Defines for ESP_UART */
+#define ESP_UART_INST                                                      UART2
+#define ESP_UART_INST_FREQUENCY                                         32000000
+#define ESP_UART_INST_IRQHandler                                UART2_IRQHandler
+#define ESP_UART_INST_INT_IRQN                                    UART2_INT_IRQn
+#define GPIO_ESP_UART_RX_PORT                                              GPIOB
+#define GPIO_ESP_UART_TX_PORT                                              GPIOB
+#define GPIO_ESP_UART_RX_PIN                                      DL_GPIO_PIN_16
+#define GPIO_ESP_UART_TX_PIN                                      DL_GPIO_PIN_15
+#define GPIO_ESP_UART_IOMUX_RX                                   (IOMUX_PINCM33)
+#define GPIO_ESP_UART_IOMUX_TX                                   (IOMUX_PINCM32)
+#define GPIO_ESP_UART_IOMUX_RX_FUNC                    IOMUX_PINCM33_PF_UART2_RX
+#define GPIO_ESP_UART_IOMUX_TX_FUNC                    IOMUX_PINCM32_PF_UART2_TX
+#define ESP_UART_BAUD_RATE                                              (115200)
+#define ESP_UART_IBRD_32_MHZ_115200_BAUD                                    (17)
+#define ESP_UART_FBRD_32_MHZ_115200_BAUD                                    (23)
 
 
 
@@ -227,6 +259,8 @@ void SYSCFG_DL_PWM_1_init(void);
 void SYSCFG_DL_CONTROL_TIMER_init(void);
 void SYSCFG_DL_OLED_I2C_init(void);
 void SYSCFG_DL_JY61P_UART_init(void);
+void SYSCFG_DL_GPS_UART_init(void);
+void SYSCFG_DL_ESP_UART_init(void);
 
 
 bool SYSCFG_DL_saveConfiguration(void);

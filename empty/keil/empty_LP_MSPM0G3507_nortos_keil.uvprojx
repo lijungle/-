@@ -405,6 +405,16 @@
               <FilePath>../jy61p.c</FilePath>
             </File>
             <File>
+              <FileName>esp_link.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../esp_link.c</FilePath>
+            </File>
+            <File>
+              <FileName>gps.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../gps.c</FilePath>
+            </File>
+            <File>
               <FileName>oled_status.c</FileName>
               <FileType>1</FileType>
               <FilePath>../oled_status.c</FilePath>

@@ -10,6 +10,8 @@
 #define RIGHT_MOTOR_DEADZONE_PERCENT 8.0f
 static JY61P imu_rx;
 static JY61P imu;
+static GPSState gps;
+static ESPLink esp;
 static volatile uint32_t ticks;
 static volatile uint32_t left_count, right_count;
 static uint32_t left_previous, right_previous;
@@ -26,6 +28,8 @@ void board_init(void)
 {
     jy61p_init(&imu_rx);
     jy61p_init(&imu);
+    gps_init(&gps);
+    esp_init(&esp);
     SYSCFG_DL_init();                                  /* 外设配置全部由 SysConfig 生成 */
     motor_set(0, 0);                                   /* 启动计数器前设置两输入同高刹车 */
     DL_TimerA_startCounter(PWM_0_INST);
@@ -36,6 +40,10 @@ void board_init(void)
     NVIC_EnableIRQ(CONTROL_TIMER_INST_INT_IRQN);
     NVIC_ClearPendingIRQ(JY61P_UART_INST_INT_IRQN);
     NVIC_EnableIRQ(JY61P_UART_INST_INT_IRQN);
+    NVIC_ClearPendingIRQ(GPS_UART_INST_INT_IRQN);
+    NVIC_EnableIRQ(GPS_UART_INST_INT_IRQN);              /* GPS 接收只启用 UART1 RX 中断 */
+    NVIC_ClearPendingIRQ(ESP_UART_INST_INT_IRQN);
+    NVIC_EnableIRQ(ESP_UART_INST_INT_IRQN);
     oled_init();                                      /* 初始化时电机保持刹车 */
 }
 
@@ -51,6 +59,7 @@ void board_poll(void)
     __disable_irq();
     imu = imu_rx;                                     /* 防止主循环读到半更新的惯导状态 */
     __set_PRIMASK(mask);
+    gps_poll(&gps, ticks);                             /* 限量解析，不能阻塞十毫秒控制节拍 */
     oled_poll();
 }
 
@@ -263,6 +272,7 @@ float imu_gyro_z(void) { return imu.gyro_z; }
  * 备       注：串口中断更新独立接收状态，board_poll 负责复制快照
  ******************************************************************/
 JY61P *imu_state(void) { return &imu; }
+const GPSState *gps_state(void) { return &gps; }
 
 /******************************************************************
  * 函 数 名 称：GROUP1_IRQHandler
@@ -312,5 +322,80 @@ void JY61P_UART_INST_IRQHandler(void)
     if (DL_UART_Main_getPendingInterrupt(JY61P_UART_INST) == DL_UART_MAIN_IIDX_RX) {
         while (!DL_UART_Main_isRXFIFOEmpty(JY61P_UART_INST))
             jy61p_feed(&imu_rx, DL_UART_Main_receiveData(JY61P_UART_INST), ticks);
+    }
+}
+
+/******************************************************************
+ * 函 数 名 称：GPS_UART_INST_IRQHandler
+ * 函 数 说 明：读取 UART1 FIFO 并写入 GPS 环形缓冲区
+ * 函 数 形 参：无
+ * 函 数 返 回：无
+ * 备       注：中断不做 NMEA 解析，避免阻塞惯导和电机控制
+ ******************************************************************/
+void GPS_UART_INST_IRQHandler(void)
+{
+    if (DL_UART_Main_getPendingInterrupt(GPS_UART_INST) == DL_UART_MAIN_IIDX_RX) {
+        while (!DL_UART_Main_isRXFIFOEmpty(GPS_UART_INST))
+            gps_isr_byte(&gps, DL_UART_Main_receiveData(GPS_UART_INST));
+    }
+}
+
+/******************************************************************
+ * 函 数 名 称：esp_fill_tx
+ * 函 数 说 明：把发送环形缓冲区数据送入 FIFO，队列空时关闭 TX 中断
+ * 函 数 形 参：无
+ * 函 数 返 回：无
+ * 备       注：只在 UART 中断或短暂关中断期间调用，无阻塞等待
+ ******************************************************************/
+static void esp_fill_tx(void)
+{
+    uint8_t byte;
+    while (!DL_UART_Main_isTXFIFOFull(ESP_UART_INST) && esp_tx_byte(&esp, &byte))
+        DL_UART_Main_transmitData(ESP_UART_INST, byte);    /* FIFO 有空位才写入 */
+    if (esp.tx_tail == esp.tx_head)
+        DL_UART_Main_disableInterrupt(ESP_UART_INST, DL_UART_MAIN_INTERRUPT_TX);
+    else DL_UART_Main_enableInterrupt(ESP_UART_INST, DL_UART_MAIN_INTERRUPT_TX);
+}
+
+/******************************************************************
+ * 函 数 名 称：esp_command
+ * 函 数 说 明：主循环非阻塞读取新的远程命令
+ * 函 数 形 参：command - 输出命令
+ * 函 数 返 回：1 有命令，0 无命令
+ ******************************************************************/
+int esp_command(ESPCommand *command) { return esp_poll(&esp, command); }
+
+/******************************************************************
+ * 函 数 名 称：esp_report
+ * 函 数 说 明：每二百毫秒发送一次位置，发送环形缓冲区满时跳过
+ * 函 数 形 参：heading - 惯导航向；speed - 编码器测得的米每秒
+ * 函 数 返 回：无
+ ******************************************************************/
+void esp_report(float heading, float speed)
+{
+    static uint32_t previous;
+    uint32_t now = ticks, mask;
+    if (now - previous < 200U) return;
+    previous = now;
+    if (!esp_position(&esp, gps.latitude, gps.longitude, heading, speed)) return;
+    mask = __get_PRIMASK(); __disable_irq();
+    esp_fill_tx();                                       /* 首次填 FIFO 并启动后续 TX 中断 */
+    __set_PRIMASK(mask);
+}
+
+/******************************************************************
+ * 函 数 名 称：ESP_UART_INST_IRQHandler
+ * 函 数 说 明：UART2 中断搬运收发字节，不解析 JSON
+ * 函 数 形 参：无
+ * 函 数 返 回：无
+ ******************************************************************/
+void ESP_UART_INST_IRQHandler(void)
+{
+    uint32_t pending;
+    while ((pending = DL_UART_Main_getPendingInterrupt(ESP_UART_INST)) != DL_UART_MAIN_IIDX_NO_INTERRUPT) {
+        if (pending == DL_UART_MAIN_IIDX_RX) {
+            while (!DL_UART_Main_isRXFIFOEmpty(ESP_UART_INST))
+                esp_rx_byte(&esp, DL_UART_Main_receiveData(ESP_UART_INST));
+        } else if (pending == DL_UART_MAIN_IIDX_TX) esp_fill_tx();
     }
 }

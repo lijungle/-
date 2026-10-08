@@ -153,6 +153,7 @@ static void oled_words(unsigned y, int a, int b, int c, int d)
 void oled_status(const CarControl *car, const ObstacleState *o, float yaw)
 {
     char text[32];                                       /* 容纳格式化函数对完整整数范围的输出要求 */
+    const GPSState *gps = gps_state();
     if (!available || refreshing || board_millis() - frame_ms < 100) return;
     frame_ms = board_millis();
     memset(gram, 0, sizeof(gram));
@@ -172,6 +173,21 @@ void oled_status(const CarControl *car, const ObstacleState *o, float yaw)
         oled_text(72, 32, text);
         snprintf(text, sizeof(text), "E%u P%u %05uus", o->echo_stage, o->echo_level, o->echo_us);
         oled_text(0, 48, text);                             /* 零未收到上升沿，一只有上升沿，二完整脉冲 */
+    } else if (car->setting == SETTING_GPS) {
+        oled_text(0, 0, "GPS");
+        if (gps->overflow) oled_text(64, 0, "OVF");
+        if (gps->last_sentence_ms == 0 || board_millis() - gps->last_sentence_ms > 3000U) {
+            oled_text(0, 16, "NO DATA");
+        } else {
+            snprintf(text, sizeof(text), "%c%09.5f", gps->latitude < 0 ? 'S' : 'N',
+                     gps->latitude < 0 ? -gps->latitude : gps->latitude);
+            oled_text(0, 16, text);                       /* 纬度显示十进制度和南北半球 */
+            snprintf(text, sizeof(text), "%c%010.5f", gps->longitude < 0 ? 'W' : 'E',
+                     gps->longitude < 0 ? -gps->longitude : gps->longitude);
+            oled_text(0, 32, text);                       /* 经度显示十进制度和东西半球 */
+            snprintf(text, sizeof(text), "Q:%u HDOP:%4.2f", (unsigned)gps->quality, gps->hdop);
+            oled_text(0, 48, text);                       /* 定位质量 0 表示当前无有效定位 */
+        }
     } else if (car->setting) {
         oled_words(0, car->setting == SETTING_DISTANCE ? CN_JU :
                    car->setting == SETTING_SPEED ? CN_SU : CN_JU,
@@ -187,7 +203,8 @@ void oled_status(const CarControl *car, const ObstacleState *o, float yaw)
                  (unsigned)car->target, (unsigned)car->counts_per_meter);
         oled_text(64, 32, text);
     } else if (car->running) {
-        if (car->mode == MODE_SQUARE) oled_words(0, CN_RAO, CN_XING, -1, -1);
+        if (car->phase == ROUTE_REMOTE) oled_text(0, 0, "REMOTE");
+        else if (car->mode == MODE_SQUARE) oled_words(0, CN_RAO, CN_XING, -1, -1);
         else if (car->phase == ROUTE_STRAIGHT) oled_words(0, CN_ZHI_STRAIGHT, CN_XING, -1, -1);
         else if (car->phase == ROUTE_BRAKE) oled_words(0, CN_TING, CN_ZHI, -1, -1);
         else if (car->phase == ROUTE_CHECK) oled_words(0, CN_JIAN, CN_CE, -1, -1);
@@ -221,7 +238,7 @@ void oled_status(const CarControl *car, const ObstacleState *o, float yaw)
         if (!car->running) oled_words(32, car->mode == MODE_SQUARE ? CN_RAO : CN_ZHI_STRAIGHT,
                                       CN_XING, -1, -1);     /* 停止页显示当前路线模式 */
     }
-    {
+    if (car->setting != SETTING_GPS) {
         oled_chinese(0, 48, CN_HANG); oled_chinese(16, 48, CN_XIANG);
         int tenths = (int)(yaw * 10);
         snprintf(text, sizeof(text), "%c%3d.%d", tenths < 0 ? '-' : '+',

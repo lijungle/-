@@ -3,8 +3,11 @@
 #include <stdint.h>
 #include "control.h"
 #include "jy61p.h"
+#include "gps.h"
 void board_init(void);
 void board_poll(void);
+int esp_command(ESPCommand *command);
+void esp_report(float heading, float speed);
 void oled_init(void);
 void oled_poll(void);
 uint32_t board_millis(void);
@@ -17,4 +20,5 @@ void encoder_counts(int32_t *left, int32_t *right);
 void encoder_reset_counts(void);
 float imu_yaw(void), imu_gyro_z(void);
 JY61P *imu_state(void);
+const GPSState *gps_state(void);
 #endif

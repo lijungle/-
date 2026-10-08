@@ -59,6 +59,8 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_CONTROL_TIMER_init();
     SYSCFG_DL_OLED_I2C_init();
     SYSCFG_DL_JY61P_UART_init();
+    SYSCFG_DL_GPS_UART_init();
+    SYSCFG_DL_ESP_UART_init();
     /* Ensure backup structures have no valid state */
 	gPWM_0Backup.backupRdy 	= false;
 	gPWM_1Backup.backupRdy 	= false;
@@ -102,6 +104,8 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_TimerG_reset(CONTROL_TIMER_INST);
     DL_I2C_reset(OLED_I2C_INST);
     DL_UART_Main_reset(JY61P_UART_INST);
+    DL_UART_Main_reset(GPS_UART_INST);
+    DL_UART_Main_reset(ESP_UART_INST);
 
     DL_GPIO_enablePower(GPIOA);
     DL_GPIO_enablePower(GPIOB);
@@ -110,6 +114,8 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_TimerG_enablePower(CONTROL_TIMER_INST);
     DL_I2C_enablePower(OLED_I2C_INST);
     DL_UART_Main_enablePower(JY61P_UART_INST);
+    DL_UART_Main_enablePower(GPS_UART_INST);
+    DL_UART_Main_enablePower(ESP_UART_INST);
     delay_cycles(POWER_STARTUP_DELAY);
 }
 
@@ -140,6 +146,14 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
         GPIO_JY61P_UART_IOMUX_TX, GPIO_JY61P_UART_IOMUX_TX_FUNC);
     DL_GPIO_initPeripheralInputFunction(
         GPIO_JY61P_UART_IOMUX_RX, GPIO_JY61P_UART_IOMUX_RX_FUNC);
+    DL_GPIO_initPeripheralOutputFunction(
+        GPIO_GPS_UART_IOMUX_TX, GPIO_GPS_UART_IOMUX_TX_FUNC);
+    DL_GPIO_initPeripheralInputFunction(
+        GPIO_GPS_UART_IOMUX_RX, GPIO_GPS_UART_IOMUX_RX_FUNC);
+    DL_GPIO_initPeripheralOutputFunction(
+        GPIO_ESP_UART_IOMUX_TX, GPIO_ESP_UART_IOMUX_TX_FUNC);
+    DL_GPIO_initPeripheralInputFunction(
+        GPIO_ESP_UART_IOMUX_RX, GPIO_ESP_UART_IOMUX_RX_FUNC);
 
     DL_GPIO_initDigitalInputFeatures(KEY1_KEY1_PIN_IOMUX,
 		 DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
@@ -405,5 +419,77 @@ SYSCONFIG_WEAK void SYSCFG_DL_JY61P_UART_init(void)
 
 
     DL_UART_Main_enable(JY61P_UART_INST);
+}
+
+static const DL_UART_Main_ClockConfig gGPS_UARTClockConfig = {
+    .clockSel    = DL_UART_MAIN_CLOCK_BUSCLK,
+    .divideRatio = DL_UART_MAIN_CLOCK_DIVIDE_RATIO_1
+};
+
+static const DL_UART_Main_Config gGPS_UARTConfig = {
+    .mode        = DL_UART_MAIN_MODE_NORMAL,
+    .direction   = DL_UART_MAIN_DIRECTION_TX_RX,
+    .flowControl = DL_UART_MAIN_FLOW_CONTROL_NONE,
+    .parity      = DL_UART_MAIN_PARITY_NONE,
+    .wordLength  = DL_UART_MAIN_WORD_LENGTH_8_BITS,
+    .stopBits    = DL_UART_MAIN_STOP_BITS_ONE
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_GPS_UART_init(void)
+{
+    DL_UART_Main_setClockConfig(GPS_UART_INST, (DL_UART_Main_ClockConfig *) &gGPS_UARTClockConfig);
+
+    DL_UART_Main_init(GPS_UART_INST, (DL_UART_Main_Config *) &gGPS_UARTConfig);
+    /*
+     * Configure baud rate by setting oversampling and baud rate divisors.
+     *  Target baud rate: 115200
+     *  Actual baud rate: 115211.52
+     */
+    DL_UART_Main_setOversampling(GPS_UART_INST, DL_UART_OVERSAMPLING_RATE_16X);
+    DL_UART_Main_setBaudRateDivisor(GPS_UART_INST, GPS_UART_IBRD_32_MHZ_115200_BAUD, GPS_UART_FBRD_32_MHZ_115200_BAUD);
+
+
+    /* Configure Interrupts */
+    DL_UART_Main_enableInterrupt(GPS_UART_INST,
+                                 DL_UART_MAIN_INTERRUPT_RX);
+
+
+    DL_UART_Main_enable(GPS_UART_INST);
+}
+
+static const DL_UART_Main_ClockConfig gESP_UARTClockConfig = {
+    .clockSel    = DL_UART_MAIN_CLOCK_BUSCLK,
+    .divideRatio = DL_UART_MAIN_CLOCK_DIVIDE_RATIO_1
+};
+
+static const DL_UART_Main_Config gESP_UARTConfig = {
+    .mode        = DL_UART_MAIN_MODE_NORMAL,
+    .direction   = DL_UART_MAIN_DIRECTION_TX_RX,
+    .flowControl = DL_UART_MAIN_FLOW_CONTROL_NONE,
+    .parity      = DL_UART_MAIN_PARITY_NONE,
+    .wordLength  = DL_UART_MAIN_WORD_LENGTH_8_BITS,
+    .stopBits    = DL_UART_MAIN_STOP_BITS_ONE
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_ESP_UART_init(void)
+{
+    DL_UART_Main_setClockConfig(ESP_UART_INST, (DL_UART_Main_ClockConfig *) &gESP_UARTClockConfig);
+
+    DL_UART_Main_init(ESP_UART_INST, (DL_UART_Main_Config *) &gESP_UARTConfig);
+    /*
+     * Configure baud rate by setting oversampling and baud rate divisors.
+     *  Target baud rate: 115200
+     *  Actual baud rate: 115211.52
+     */
+    DL_UART_Main_setOversampling(ESP_UART_INST, DL_UART_OVERSAMPLING_RATE_16X);
+    DL_UART_Main_setBaudRateDivisor(ESP_UART_INST, ESP_UART_IBRD_32_MHZ_115200_BAUD, ESP_UART_FBRD_32_MHZ_115200_BAUD);
+
+
+    /* Configure Interrupts */
+    DL_UART_Main_enableInterrupt(ESP_UART_INST,
+                                 DL_UART_MAIN_INTERRUPT_RX);
+
+
+    DL_UART_Main_enable(ESP_UART_INST);
 }
 
